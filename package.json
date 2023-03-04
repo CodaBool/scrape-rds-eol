@@ -4,8 +4,7 @@
   "type": "module",
   "main": "main.js",
   "scripts": {
-    "start": "node main.js",
-    "local": "node main.js -t"
+    "start": "node main.js"
   },
   "keywords": [],
   "author": "codabool",
