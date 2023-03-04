@@ -1,6 +1,7 @@
 import jsdom from 'jsdom'
 import axios from 'axios'
 import matter from 'gray-matter'
+import { markdownTable } from 'markdown-table'
 import fs from 'fs'
 
 const { JSDOM } = jsdom
@@ -11,7 +12,7 @@ function format(date) {
 
 const dbs = {
   'mysql': 'https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/MySQL.Concepts.VersionMgmt.html',
-  'postgres': 'https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-release-calendar.html',
+  'postgresql': 'https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-release-calendar.html',
 }
 
 for (const [db, url] of Object.entries(dbs)) {
@@ -31,10 +32,10 @@ for (const [db, url] of Object.entries(dbs)) {
     // first table is minor, second is major
     let minor = false
     if (i === '0') {
-      console.log('\nScraping', db, 'minor')
+      console.log('Scraping', db, 'minor')
       minor = true
     } else {
-      console.log('\nScraping', db, 'major')
+      console.log('Scraping', db, 'major')
     }
 
     // select the table rows
@@ -45,23 +46,29 @@ for (const [db, url] of Object.entries(dbs)) {
       if (row.childNodes.length === 3) continue
     
       const release = {}
+      // console.log()
 
       for (let [num, col] of row.childNodes.entries()) {
         // ignore all nodes that are not Table Data
         if (col.tagName !== 'TD') continue
 
-        // for some reason postgres iteration is off by one
-        if (db === 'postgres' && i === '1') {
+        // for some reason postgresql iteration is off by one
+        if (db === 'postgresql' && i === '1') {
           num++
         }
 
         if (num === 1) {
-          let relevantLine = col.textContent.trim()
-          if (col.textContent.includes('\n')) {
-            relevantLine = col.textContent.trim().split('\n')[0]
+          const lines = col.textContent.trim().split('\n')
+          if (lines.length > 1) {
+            const latestMinor = lines[1].replace(/[^0-9.]/g, '')
+            // console.log('latest minor version', latestMinor)
+            if (!latestMinor) {
+              // console.log('no minor')
+            }
+            release.latest = '"' + latestMinor + '"'
           }
-          const version = relevantLine.replace(/[^0-9.]/g, '')
-          console.log('version', version)
+          const version = lines[0].replace(/[^0-9.]/g, '')
+          // console.log('major version', version)
           release.releaseCycle = '"' + version + '"'
         } else if (num === 3) {
           // Community release date
@@ -69,7 +76,7 @@ for (const [db, url] of Object.entries(dbs)) {
         } else if (num === 5) {
           // RDS release date
           const date = format(new Date(col.textContent.trim()))
-          console.log('RDS release date', date)
+          // console.log('RDS release date', date)
           release.releaseDate = date
         } else if (num === 7) {
           
@@ -78,7 +85,7 @@ for (const [db, url] of Object.entries(dbs)) {
 
             // RDS end of standard support date
             const date = format(new Date(col.textContent.trim()))
-            console.log('RDS end of standard support date', date)
+            // console.log('RDS end of standard support date', date)
             release.eol = date
             minors.push(release)
           } else {
@@ -89,7 +96,7 @@ for (const [db, url] of Object.entries(dbs)) {
         } else if (num === 9) {
           // RDS end of standard support date
           const date = format(new Date(col.textContent.trim()))
-          console.log('RDS end of standard support date', date)
+          // console.log('RDS end of standard support date', date)
           release.eol = date
           majors.push(release)
         }
@@ -102,19 +109,44 @@ for (const [db, url] of Object.entries(dbs)) {
     name = 'MySQL'
   }
 
-  write(name, { title: 'Amazon RDS for ' + name, category: 'db', iconSlug: db, permalink: '/rds-' + db, alternate_urls: [`/rds-${db}-major`], releasePolicyLink: url, releaseImage: 'https://docs.aws.amazon.com/assets/r/images/aws_logo_dark.png', releases: majors }, false)
-  write(name, { title: 'Amazon RDS for ' + name, category: 'db', iconSlug: db, permalink: `/rds-${db}-minor`, releasePolicyLink: url, releaseImage: 'https://docs.aws.amazon.com/assets/r/images/aws_logo_dark.png', releases: minors }, true)
+  // grab latest release date
+  for (const major of majors) {
+    for (const minor of minors) {
+      if (major.latest === minor.releaseCycle) {
+        major.latestReleaseDate = minor.releaseDate
+      }
+    }
+  }
+
+  write(name, { title: 'Amazon RDS for ' + name, category: 'db', iconSlug: db, permalink: '/rds-' + db, releasePolicyLink: url, releases: majors }, minors)
 }
 
-function write(name, obj, minor) {
+function write(name, obj, minors) {
+  const tableInput = []
+  tableInput.push(['Release', 'Security Support', 'RDS Release'])
+  for (const r of minors) {
+    tableInput.push([r.releaseCycle.replace(/"/g, ""), r.eol, r.releaseDate])
+  }
+  const table = markdownTable(tableInput)
+
   const md = `
-Amazon RDS for ${name} is a PaaS offering from Amazon for creating ${name} Databases on AWS.
+> [Amazon RDS for ${name}](https://aws.amazon.com/rds/${name.toLowerCase()}) is a PaaS offering from Amazon for creating ${name} Databases on AWS. RDS makes it easier to set up, operate, and scale ${name} deployments on AWS cloud. ${name} runs against its source Community Edition.
 
-RDS makes it easier to set up, operate, and scale ${name} deployments on AWS cloud.
+**${name} recommends that all users run the latest available minor release for whatever major version is in use.**
 
-${name} runs against it's source Community Edition.
+- AWS will provide support for major releases 3 years after their RDS release date.
 
-This is a collection of ${minor ? 'minor' : 'major'} versions.`
+- AWS will provide support for minor versions 1 year after their RDS release date.
+
+Keep in mind that by default minor versions are automatically upgraded during maintenance windows.
+
+For more info on how RDS versions are deprecated see the AWS [documentation](https://aws.amazon.com/rds/faqs/#What_happens_when_an_Amazon_RDS_DB_engine_version_is_deprecated.3F).
+
+Please follow [best practices](${name === 'MySQL' ? 'https://aws.amazon.com/blogs/database/best-practices-for-upgrading-amazon-rds-for-mysql-and-amazon-rds-for-mariadb' : 'https://aws.amazon.com/blogs/database/best-practices-for-upgrading-amazon-rds-to-major-and-minor-versions-of-postgresql'}) when performing upgrades to your RDS instance.
+
+### Minor Version Support
+
+${table}`
 
   const yaml = matter.stringify(md, obj)
   
@@ -126,7 +158,7 @@ This is a collection of ${minor ? 'minor' : 'major'} versions.`
   let t = 0
   const newLinesAroundBtmMatter = noSingleQuotes.replace(/---/g, match => ++t === 2 ? '\n---' : match)
 
-  const fileName = obj.permalink.slice(1) + '.yml'
+  const fileName = obj.permalink.slice(1)  + '.md'
   
   fs.writeFileSync(fileName, newLinesAroundBtmMatter)
 }
