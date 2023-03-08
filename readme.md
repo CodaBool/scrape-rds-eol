@@ -10,3 +10,8 @@ Then the data is used by the [endoflife.date](https://endoflife.date) project to
 ### 📃 Usage
 1. npm i
 2. npm start
+
+
+#### Options
+- you can run `npm run json` to output to a json file
+- you can run `npm run minor` to include minor versions in a markdown file
